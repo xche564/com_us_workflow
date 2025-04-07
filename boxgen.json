@@ -1,0 +1,25 @@
+{
+    "cubesize": 80, 
+    "charge_method": "bcc",
+    "solutes": [
+        {
+        "frcmod": "bdp.frcmod",
+        "mol2": "bdp.mol2",
+        "xyzfile": "bdp.pdb"
+    },
+    {
+        "frcmod": "/home/xuchen/rfmm/data/btb/btb.frcmod",
+        "mol2": "/home/xuchen/rfmm/data/btb/btb.mol2",
+        "xyzfile": "/home/xuchen/rfmm/data/btb/btb.pdb"
+    }
+],
+    "solvents": [
+        {
+            "name": "acetonitrile",
+            "number": 4600,
+            "residue_name": "C3N",
+            "frcmod": "acetonitrile.frcmod",
+            "prep": "acetonitrile.prep"
+        }
+    ]
+}
