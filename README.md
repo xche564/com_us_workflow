@@ -41,4 +41,3 @@ From the constrained MD simulation, Weighted histogram analysis method (WHAM) wa
 >python pmf.py
 
 
-
