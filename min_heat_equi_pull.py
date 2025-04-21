@@ -4,6 +4,9 @@ This script generates input files and submission scripts for a complete
 AMBER Umbrella Sampling MD workflow including minimization, heating, equilibration, and pulling.
 """
 import subprocess
+import os
+import sys
+import argparse
 
 # do this command before running:
 # export LD_LIBRARY_PATH=/home/shared_write/gcc/installation/lib64:$LD_LIBRARY_PATH
@@ -39,7 +42,7 @@ EQUIL_STEPS = 25000          # Equilibration steps
 # Pulling parameters
 PULL_DIST_START = 3.0        # Initial COM distance (Å)
 PULL_DIST_END = 33.0         # Final COM distance (Å)
-PULL_FORCE_CONST = 1.0       # Force constant for pulling (kcal/mol·Å²)
+PULL_FORCE_CONST = 2.0       # Force constant for pulling (kcal/mol·Å²)
 PROD_FORCE_CONST = 2.0       # Force constant for production (kcal/mol·Å²)
 PULLING_RATE = 0.01          # Pulling rate (nm/ps)
 
@@ -393,55 +396,55 @@ igr2={igr2},
         f.write(disang_prod)
 
 
-def create_submission_script(parm_file, rst_file):
+def create_submission_commands(parm_file, rst_file, system_name):
     """
-    Create a submission script for running the AMBER simulations.
+    Create the AMBER simulation commands for a specific system.
     
     Args:
         parm_file (str): Topology file name
         rst_file (str): Input coordinate file name
+        system_name (str): Name of the BDP system
         
     Returns:
-        str: Submission script content
+        str: Commands for running AMBER simulations
     """
-    script = f"""#!/bin/bash
-#SBATCH --time=24:00:00
-#SBATCH --partition=day-long
-#SBATCH --nodes=1
-#SBATCH --mem=5G
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --exclude=node1
-#SBATCH --gres=gpu:1
-echo $HOSTNAME
+    # Commands using srun and shifter as in the original amber.sh
+    commands = f"""command="srun --cpu-bind=cores --gpu-bind=none --module mpich,gpu shifter pmemd.cuda -O -i min.in -c {rst_file} -p {parm_file} -r min.rst -x min.nc -o min.out -inf min.info"
+echo $command
+$command
 
-export LD_LIBRARY_PATH=/home/shared_write/gcc/installation/lib64:$LD_LIBRARY_PATH
-export PATH=/home/shared_write/gcc/installation/bin:$PATH
-bash /home/shared_write/gcc/amber_cuda/amber-interactive.sh
+command="srun --cpu-bind=cores --gpu-bind=none --module mpich,gpu shifter pmemd.cuda -O -i heat1.in -o heat1.out -p {parm_file} -c min.rst -r heat1.rst -x heat1.nc -ref min.rst"
+echo $command
+$command
 
-#--------------------------------------------------------------#
+command="srun --cpu-bind=cores --gpu-bind=none --module mpich,gpu shifter pmemd.cuda -O -i heat2.in -o heat2.out -p {parm_file} -c heat1.rst -r heat2.rst -x heat2.nc -ref heat1.rst"
+echo $command
+$command
 
-pmemd.cuda -O -i min.in -c {rst_file} -p {parm_file} -r min.rst -x min.nc -o min.out -inf min.info
-pmemd.cuda -O -i heat1.in -o heat1.out -p {parm_file} -c min.rst -r heat1.rst -x heat1.nc -ref min.rst
-pmemd.cuda -O -i heat2.in -o heat2.out -p {parm_file} -c heat1.rst -r heat2.rst -x heat2.nc -ref heat1.rst
-pmemd.cuda -O -i equil.in -o equil.out -p {parm_file} -c heat2.rst -r equil.rst -x equil.nc -inf equil.info
-pmemd.cuda -O -i pull.in -o pull.out -p {parm_file} -c equil.rst -r pull.rst -x pull.nc -inf pull.info
-"""
-    return script
+command="srun --cpu-bind=cores --gpu-bind=none --module mpich,gpu shifter pmemd.cuda -O -i equil.in -o equil.out -p {parm_file} -c heat2.rst -r equil.rst -x equil.nc -inf equil.info"
+echo $command
+$command
 
-
-def submit_job(script_path):
-    """
-    Submit the job to the scheduler.
-    
-    Args:
-        script_path (str): Path to the submission script
-    """
-    subprocess.run(["sbatch", script_path])
+command="srun --cpu-bind=cores --gpu-bind=none --module mpich,gpu shifter pmemd.cuda -O -i pull.in -o pull.out -p {parm_file} -c equil.rst -r pull.rst -x pull.nc -inf pull.info"
+echo $command
+$command"""
+    return commands
 
 
 def main():
-    """Main function to generate all files and submit the job."""
+    """Main function to generate all files."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Generate AMBER simulation files for a BDP system.')
+    parser.add_argument('--system', help='Name of the BDP system (folder name)', default='')
+    args = parser.parse_args()
+    
+    system_name = args.system
+    
+    # If we have a system name, get the GROUP values from PDB
+    if system_name:
+        global GROUP1, GROUP2
+        GROUP1, GROUP2 = extract_first_two_residues_idx_from_pdb(PDB_FILE)
+    
     # Calculate number of steps for pulling based on rate and distance
     pulling_steps = int((PULL_DIST_END - PULL_DIST_START) * 0.1 / (PULLING_RATE * DT_PRODUCTION))
     
@@ -531,19 +534,15 @@ def main():
         igr2=GROUP2
     )
 
-    # Generate and write the submission script
-    submission_script = create_submission_script(PARM_FILE, RST_FILE)
-    with open("amber.sh", "w") as f:
-        f.write(submission_script)
-
-    # Submit the job
-    print("Job files prepared. Submission script created as 'amber.sh'.")
-    submit_decision = input("Do you want to submit the job now? (y/n): ")
-    if submit_decision.lower() == 'y':
-        submit_job("./amber.sh")
-        print("Job submitted.")
+    # Generate and print the commands for this system
+    if system_name:
+        commands = create_submission_commands(PARM_FILE, RST_FILE, system_name)
+        # Create a marker file to indicate this system is prepared
+        with open(".prepared", "w") as f:
+            f.write("Files prepared\n")
+        print(commands)
     else:
-        print("Job not submitted. Run 'sbatch amber.sh' to submit manually.")
+        print("No system name provided. Files generated in current directory.")
 
 
 if __name__ == "__main__":
